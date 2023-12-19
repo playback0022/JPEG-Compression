@@ -93,27 +93,60 @@ def jpeg_image_decoding(image, padding_size):
             image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 1] = quantized_red_chrominance
             image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 2] = quantized_blue_chrominance
 
-    image += 128
-    image = np.clip(image, 0, 255)
     # unpad image
     image = image[:-padding_size[0], :-padding_size[1]]
+    image += 128
+    image = np.clip(image, 0, 255)
     image = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_YCrCb2RGB)
 
     return image
+
+
+def get_mean_squared_error(first_image, second_image):
+    return np.sum(np.square(first_image - second_image)) / first_image.size
+
+
+def jpeg_image_compression(image, desired_mean_squared_error, step=0.9):
+    compression_amount = 1.0
+    
+    encoded_image, padding_size = jpeg_image_encoding(image, compression_amount)
+    decoded_image = jpeg_image_decoding(encoded_image, padding_size)
+    mean_squared_error = get_mean_squared_error(image, decoded_image)
+    
+    if mean_squared_error < desired_mean_squared_error:
+        while mean_squared_error < desired_mean_squared_error:
+            compression_amount /= step
+            encoded_image, padding_size = jpeg_image_encoding(image, compression_amount)
+            decoded_image = jpeg_image_decoding(encoded_image, padding_size)
+            mean_squared_error = get_mean_squared_error(image, decoded_image)
+    elif mean_squared_error > desired_mean_squared_error:
+        while mean_squared_error > desired_mean_squared_error:
+            compression_amount *= step
+            encoded_image, padding_size = jpeg_image_encoding(image, compression_amount)
+            decoded_image = jpeg_image_decoding(encoded_image, padding_size)
+            mean_squared_error = get_mean_squared_error(image, decoded_image)
+
+    return decoded_image, compression_amount, mean_squared_error
 
 
 def main():
     image = sp.datasets.face()
     image = image[:-7, :-7]
     plt.imshow(image)
-    plt.savefig('original_image.png')
+    plt.savefig("original_image.png")
     plt.show()
 
-    image, padding_size = jpeg_image_encoding(image, compression_amount=1.0)
-    image = jpeg_image_decoding(image, padding_size)
-    plt.imshow(image)
-    plt.savefig('encoded_image.png')
+    encoded_image, padding_size = jpeg_image_encoding(image, compression_amount=1.0)
+    decoded_image = jpeg_image_decoding(encoded_image, padding_size)
+    plt.imshow(decoded_image)
+    plt.savefig("compressed_image.png")
     plt.show()
+
+    desired_image, compression_amount, mean_squared_error = jpeg_image_compression(image, desired_mean_squared_error=1, step=0.9)
+    plt.imshow(desired_image)
+    plt.show()
+    print(f"Mean squared error: {mean_squared_error}")
+    print(f"Compression amount: {compression_amount}")
 
 
 if __name__ == '__main__':
