@@ -52,7 +52,6 @@ def jpeg_image_encoding(image, compression_amount=1.0):
     # center pixel values around 0
     image -= 128
 
-    encoded_image = np.empty(shape=image.shape)
     for i in range(image.shape[0] // 8):
         for j in range(image.shape[1] // 8):
             block = image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8]
@@ -60,35 +59,47 @@ def jpeg_image_encoding(image, compression_amount=1.0):
             luminance = block[:, :, 0]
             dctn_of_luminance = sp.fft.dctn(luminance)
             dctn_of_luminance = luminance_quantization_matrix * compression_amount * np.round(dctn_of_luminance / luminance_quantization_matrix / compression_amount)
-            quantized_luminance = sp.fft.idctn(dctn_of_luminance)
 
             red_chrominance = block[:, :, 1]
             dctn_of_red_chrominance = sp.fft.dctn(red_chrominance)
             dctn_of_red_chrominance = chrominance_quantization_matrix * compression_amount * np.round(dctn_of_red_chrominance / chrominance_quantization_matrix / compression_amount)
-            quantized_red_chrominance = sp.fft.idctn(dctn_of_red_chrominance)
 
             blue_chrominance = block[:, :, 2]
             dctn_of_blue_chrominance = sp.fft.dctn(blue_chrominance)
             dctn_of_blue_chrominance = chrominance_quantization_matrix * compression_amount * np.round(dctn_of_blue_chrominance / chrominance_quantization_matrix / compression_amount)
+
+            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 0] = dctn_of_luminance
+            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 1] = dctn_of_red_chrominance
+            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 2] = dctn_of_blue_chrominance
+
+    return image, padding_size
+
+
+def jpeg_image_decoding(image, padding_size):
+    for i in range(image.shape[0] // 8):
+        for j in range(image.shape[1] // 8):
+            block = image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8]
+
+            dctn_of_luminance = block[:, :, 0]
+            quantized_luminance = sp.fft.idctn(dctn_of_luminance)
+
+            dctn_of_red_chrominance = block[:, :, 1]
+            quantized_red_chrominance = sp.fft.idctn(dctn_of_red_chrominance)
+
+            dctn_of_blue_chrominance = block[:, :, 2]
             quantized_blue_chrominance = sp.fft.idctn(dctn_of_blue_chrominance)
 
-            encoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 0] = quantized_luminance
-            encoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 1] = quantized_red_chrominance
-            encoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 2] = quantized_blue_chrominance
+            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 0] = quantized_luminance
+            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 1] = quantized_red_chrominance
+            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 2] = quantized_blue_chrominance
 
-    encoded_image += 128
-    encoded_image = np.clip(encoded_image, 0, 255)
+    image += 128
+    image = np.clip(image, 0, 255)
     # unpad image
-    encoded_image = encoded_image[:-padding_size[0], :-padding_size[1]]
-    encoded_image = cv2.cvtColor(encoded_image.astype(np.uint8), cv2.COLOR_YCrCb2RGB)
+    image = image[:-padding_size[0], :-padding_size[1]]
+    image = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_YCrCb2RGB)
 
-    plt.imshow(encoded_image)
-    plt.savefig('encoded_image.png')
-    plt.show()
-
-
-# def jpeg_image_decoding(image):
-
+    return image
 
 
 def main():
@@ -97,7 +108,12 @@ def main():
     plt.imshow(image)
     plt.savefig('original_image.png')
     plt.show()
-    jpeg_image_encoding(image, 100)
+
+    image, padding_size = jpeg_image_encoding(image, compression_amount=1.0)
+    image = jpeg_image_decoding(image, padding_size)
+    plt.imshow(image)
+    plt.savefig('encoded_image.png')
+    plt.show()
 
 
 if __name__ == '__main__':
