@@ -1,7 +1,6 @@
 import numpy as np
 import scipy as sp
 import cv2
-import matplotlib.pyplot as plt
 
 
 luminance_quantization_matrix = np.array([
@@ -28,7 +27,7 @@ chrominance_quantization_matrix = np.array([
 ])
 
 
-def jpeg_image_encoding(image, compression_amount=1.0):
+def image_encoding(image, compression_factor=1.0):
     image = cv2.cvtColor(image, cv2.COLOR_RGB2YCrCb)
     image = image.astype(np.float64)
 
@@ -46,39 +45,41 @@ def jpeg_image_encoding(image, compression_amount=1.0):
     # take the last column, reshape it, in order to preserve the axis each
     # set of pixel values is initially on, and repeat the set of pixel values
     # on the second axis for a 'padding' number of times
-    width_pad = np.tile(image[:, -1].reshape((768, 1, 3)), (1, padding_size[1], 1))
+    width_pad = np.tile(image[:, -1].reshape((image.shape[0], 1, 3)), (1, padding_size[1], 1))
     image = np.append(image, width_pad, axis=1)
 
     # center pixel values around 0
     image -= 128
 
+    encoded_image = np.ndarray(image.shape)
     for i in range(image.shape[0] // 8):
         for j in range(image.shape[1] // 8):
             block = image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8]
 
             luminance = block[:, :, 0]
             dctn_of_luminance = sp.fft.dctn(luminance)
-            dctn_of_luminance = luminance_quantization_matrix * compression_amount * np.round(dctn_of_luminance / luminance_quantization_matrix / compression_amount)
+            dctn_of_luminance = luminance_quantization_matrix * compression_factor * np.round(dctn_of_luminance / luminance_quantization_matrix / compression_factor)
 
             red_chrominance = block[:, :, 1]
             dctn_of_red_chrominance = sp.fft.dctn(red_chrominance)
-            dctn_of_red_chrominance = chrominance_quantization_matrix * compression_amount * np.round(dctn_of_red_chrominance / chrominance_quantization_matrix / compression_amount)
+            dctn_of_red_chrominance = chrominance_quantization_matrix * compression_factor * np.round(dctn_of_red_chrominance / chrominance_quantization_matrix / compression_factor)
 
             blue_chrominance = block[:, :, 2]
             dctn_of_blue_chrominance = sp.fft.dctn(blue_chrominance)
-            dctn_of_blue_chrominance = chrominance_quantization_matrix * compression_amount * np.round(dctn_of_blue_chrominance / chrominance_quantization_matrix / compression_amount)
+            dctn_of_blue_chrominance = chrominance_quantization_matrix * compression_factor * np.round(dctn_of_blue_chrominance / chrominance_quantization_matrix / compression_factor)
 
-            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 0] = dctn_of_luminance
-            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 1] = dctn_of_red_chrominance
-            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 2] = dctn_of_blue_chrominance
+            encoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 0] = dctn_of_luminance
+            encoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 1] = dctn_of_red_chrominance
+            encoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 2] = dctn_of_blue_chrominance
 
-    return image, padding_size
+    return encoded_image, padding_size
 
 
-def jpeg_image_decoding(image, padding_size):
-    for i in range(image.shape[0] // 8):
-        for j in range(image.shape[1] // 8):
-            block = image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8]
+def image_decoding(encoded_image, padding_size):
+    decoded_image = np.ndarray(encoded_image.shape)
+    for i in range(encoded_image.shape[0] // 8):
+        for j in range(encoded_image.shape[1] // 8):
+            block = encoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8]
 
             dctn_of_luminance = block[:, :, 0]
             quantized_luminance = sp.fft.idctn(dctn_of_luminance)
@@ -89,65 +90,76 @@ def jpeg_image_decoding(image, padding_size):
             dctn_of_blue_chrominance = block[:, :, 2]
             quantized_blue_chrominance = sp.fft.idctn(dctn_of_blue_chrominance)
 
-            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 0] = quantized_luminance
-            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 1] = quantized_red_chrominance
-            image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 2] = quantized_blue_chrominance
+            decoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 0] = quantized_luminance
+            decoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 1] = quantized_red_chrominance
+            decoded_image[i * 8: (i + 1) * 8, j * 8: (j + 1) * 8, 2] = quantized_blue_chrominance
 
     # unpad image
-    image = image[:-padding_size[0], :-padding_size[1]]
-    image += 128
-    image = np.clip(image, 0, 255)
-    image = cv2.cvtColor(image.astype(np.uint8), cv2.COLOR_YCrCb2RGB)
+    if padding_size[0]:
+        decoded_image = decoded_image[:-padding_size[0]]
 
-    return image
+    if padding_size[1]:
+        decoded_image = decoded_image[:, :-padding_size[1]]
+
+    decoded_image += 128
+    decoded_image = np.clip(decoded_image, 0, 255)
+    decoded_image = decoded_image.astype(np.uint8)
+    decoded_image = cv2.cvtColor(decoded_image, cv2.COLOR_YCrCb2RGB)
+
+    return decoded_image
 
 
 def get_mean_squared_error(first_image, second_image):
     return np.sum(np.square(first_image - second_image)) / first_image.size
 
 
-def jpeg_image_compression(image, desired_mean_squared_error, step=0.9):
-    compression_amount = 1.0
+def image_compression(image, desired_mean_squared_error, initial_compression_factor=1.0, compression_factor_step=0.9):
+    compression_factor = initial_compression_factor
     
-    encoded_image, padding_size = jpeg_image_encoding(image, compression_amount)
-    decoded_image = jpeg_image_decoding(encoded_image, padding_size)
+    encoded_image, padding_size = image_encoding(image, compression_factor)
+    decoded_image = image_decoding(encoded_image, padding_size)
     mean_squared_error = get_mean_squared_error(image, decoded_image)
     
     if mean_squared_error < desired_mean_squared_error:
         while mean_squared_error < desired_mean_squared_error:
-            compression_amount /= step
-            encoded_image, padding_size = jpeg_image_encoding(image, compression_amount)
-            decoded_image = jpeg_image_decoding(encoded_image, padding_size)
+            compression_factor /= compression_factor_step
+            encoded_image, padding_size = image_encoding(image, compression_factor)
+            decoded_image = image_decoding(encoded_image, padding_size)
             mean_squared_error = get_mean_squared_error(image, decoded_image)
     elif mean_squared_error > desired_mean_squared_error:
         while mean_squared_error > desired_mean_squared_error:
-            compression_amount *= step
-            encoded_image, padding_size = jpeg_image_encoding(image, compression_amount)
-            decoded_image = jpeg_image_decoding(encoded_image, padding_size)
+            compression_factor *= compression_factor_step
+            encoded_image, padding_size = image_encoding(image, compression_factor)
+            decoded_image = image_decoding(encoded_image, padding_size)
             mean_squared_error = get_mean_squared_error(image, decoded_image)
 
-    return decoded_image, compression_amount, mean_squared_error
+    return decoded_image, compression_factor, mean_squared_error
 
 
-def main():
-    image = sp.datasets.face()
-    image = image[:-7, :-7]
-    plt.imshow(image)
-    plt.savefig("original_image.png")
-    plt.show()
+def video_compression(source_path, destination_path, compression_factor=1.0):
+    video_capture = cv2.VideoCapture(source_path)
 
-    encoded_image, padding_size = jpeg_image_encoding(image, compression_amount=1.0)
-    decoded_image = jpeg_image_decoding(encoded_image, padding_size)
-    plt.imshow(decoded_image)
-    plt.savefig("compressed_image.png")
-    plt.show()
+    frame_width = int(video_capture.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    frame_rate = video_capture.get(cv2.CAP_PROP_FPS)
+    codec = cv2.VideoWriter_fourcc(*'XVID')
+    video_writer = cv2.VideoWriter(destination_path, codec, frame_rate, (frame_width, frame_height))
 
-    desired_image, compression_amount, mean_squared_error = jpeg_image_compression(image, desired_mean_squared_error=1, step=0.9)
-    plt.imshow(desired_image)
-    plt.show()
-    print(f"Mean squared error: {mean_squared_error}")
-    print(f"Compression amount: {compression_amount}")
+    # once all the frames have been read successfully, the
+    # return code will be non-zero and the loop will halt
+    while True:
+        return_code, frame = video_capture.read()
+        if not return_code:
+            break
 
+        # opencv loads frames in the BGR color space by default
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        encoded_frame, padding_size = image_encoding(frame, compression_factor)
+        decoded_frame = image_decoding(encoded_frame, padding_size)
+        # the BGR color space is also necessary when writing to a file
+        decoded_frame = cv2.cvtColor(decoded_frame, cv2.COLOR_RGB2BGR)
 
-if __name__ == '__main__':
-    main()
+        video_writer.write(decoded_frame)
+
+    video_capture.release()
+    video_writer.release()
